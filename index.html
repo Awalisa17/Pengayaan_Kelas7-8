@@ -1,0 +1,1036 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
+
+// Pastikan variabel global didefinisikan atau gunakan nilai default untuk pengembangan lokal
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+// Data Soal untuk Kelas 7
+const class7Data = {
+  wordSearchWords: ['Alquran', 'Hadist', 'Petunjuk', 'Syams', 'Tajwid', 'Dermawan', 'Kikir', 'Rahmat', 'Ridha', 'Mad'],
+  crossword: {
+    across: [
+      { id: 1, clue: "Kitab suci umat Islam (7 huruf)", answer: "ALQURAN", start: { row: 0, col: 0 } },
+      { id: 2, clue: "Surat ke-91 dalam Al-Qur'an (5 huruf)", answer: "SYAMS", start: { row: 2, col: 0 } },
+      { id: 3, clue: "Panjang bacaan mad thobi’i adalah ... harakat (4 huruf)", answer: "DUA", start: { row: 4, col: 0 } },
+      { id: 7, clue: "Bacaan panjang yang bertemu hamzah dalam satu kata (mad ...) – 5 huruf", answer: "WAJIB", start: { row: 6, col: 0 } },
+      { id: 8, clue: "Arti kata “Asy-Syams” – 4 huruf", answer: "MATA", start: { row: 8, col: 0 } },
+      { id: 9, clue: "Bacaan mad jaiz dibaca 2–5 ... (panjang suara) – 7 huruf", answer: "HARAKAT", start: { row: 10, col: 0 } },
+    ],
+    down: [
+      { id: 2, clue: "Hadist merupakan sumber hukum Islam setelah ... (5 huruf)", answer: "QURAN", start: { row: 0, col: 4 } },
+      { id: 4, clue: "Lawan dari sikap dermawan (5 huruf)", answer: "KIKIR", start: { row: 2, col: 8 } },
+      { id: 6, clue: "Tajwid berfungsi untuk memperindah ... Al-Qur’an (6 huruf)", answer: "BACAAN", start: { row: 4, col: 2 } },
+      { id: 10, clue: "Nama lain dari sifat tidak mau memberi meski mampu – 5 huruf", answer: "KIKIR", start: { row: 6, col: 6 } },
+      { id: 11, clue: "Tujuan utama membaca Al-Qur’an dengan tajwid – 9 huruf", answer: "KESEMPURNAAN", start: { row: 0, col: 10 } },
+    ],
+    gridSize: 12, // Maximum row/col needed for the current answers
+  },
+  quiz: [
+    {
+      question: "Apa fungsi utama Al-Qur’an bagi umat Islam?",
+      options: ["Menambah kekayaan", "Sebagai kitab sejarah", "Petunjuk hidup manusia", "Untuk dibaca saat ujian"],
+      answer: "Petunjuk hidup manusia",
+    },
+    {
+      question: "Surah Asy-Syams mengajak manusia untuk merenungi ...",
+      options: ["Akhlak Rasulullah", "Kebesaran alam dan penciptanya", "Kisah para nabi", "Sejarah bangsa Arab"],
+      answer: "Kebesaran alam dan penciptanya",
+    },
+    {
+      question: "Sikap dermawan mendekatkan kita kepada ...",
+      options: ["Kekayaan", "Popularitas", "Dunia", "Ridha Allah"],
+      answer: "Ridha Allah",
+    },
+    {
+      question: "Mad Thobi’i dibaca sebanyak ... harakat.",
+      options: ["1", "2", "3", "4"],
+      answer: "2",
+    },
+    {
+      question: "Apa arti dari hadist menurut istilah?",
+      options: ["Perkataan dan perbuatan Nabi Muhammad SAW", "Perkataan ulama", "Cerita masa lalu", "Ayat-ayat dalam Al-Qur’an"],
+      answer: "Perkataan dan perbuatan Nabi Muhammad SAW",
+    },
+    {
+      question: "Perilaku yang mencerminkan merenungi kekuasaan Allah adalah ...",
+      options: ["Menyombongkan diri setelah sukses", "Mengabaikan keindahan ciptaan Allah", "Bersyukur atas nikmat alam semesta", "Merusak lingkungan"],
+      answer: "Bersyukur atas nikmat alam semesta",
+    },
+    {
+      question: "Salah satu tanda orang yang kikir adalah ...",
+      options: ["Suka memberi pada orang miskin", "Enggan berbagi walau memiliki kelebihan", "Rajin berinfak di masjid", "Membantu tetangga saat kesusahan"],
+      answer: "Enggan berbagi walau memiliki kelebihan",
+    },
+    {
+      question: "Mad Jaiz Munfashil terjadi ketika huruf mad bertemu dengan ...",
+      options: ["Huruf mati", "Hamzah dalam satu kata", "Hamzah dalam 2 kalimat", "Tasydid"],
+      answer: "Hamzah dalam 2 kalimat",
+    },
+    {
+      question: "Rahmat Allah SWT dapat diraih dengan ...",
+      options: ["Bermalas-malasan", "Menyakiti sesama", "Taat beribadah dan berbuat baik", "Menyia-nyiakan waktu"],
+      answer: "Taat beribadah dan berbuat baik",
+    },
+    {
+      question: "Tujuan mempelajari tajwid adalah agar ...",
+      options: ["Bisa membaca Al-Qur’an dengan cepat", "Membuat Al-Qur’an lebih mudah dihafal", "Dapat menulis ayat dengan benar", "Memperindah dan menyempurnakan bacaan Al-Qur’an"],
+      answer: "Memperindah dan menyempurnakan bacaan Al-Qur’an",
+    },
+  ],
+};
+
+// Data Soal untuk Kelas 8
+const class8Data = {
+  crossword: {
+    across: [
+      { id: 1, clue: "Bacaan mad yang terjadi karena huruf hijaiyah berharkat fathah di akhir kalimat (3 kata)", answer: "MAD IWAD", start: { row: 0, col: 0 } },
+      { id: 2, clue: "Bacaan mad yang terjadi karena huruf mad bertemu huruf yang disukun karena waqaf (3 kata)", answer: "MAD ARID LISSUKUN", start: { row: 2, col: 0 } },
+      { id: 3, clue: "Bacaan mad yang terjadi setelah huruf ya atau wau sukun didahului fathah (2 kata)", answer: "MAD LAYYIN", start: { row: 4, col: 0 } },
+      { id: 7, clue: "Mad yang dibaca karena waqaf dan huruf sebelumnya huruf mad – 3 kata", answer: "MAD ARID LISSUKUN", start: { row: 6, col: 0 } },
+      { id: 8, clue: "Surat yang memuat anjuran infaq sebelum datang hari akhir – 2 kata", answer: "AL BAQARAH", start: { row: 8, col: 0 } },
+      { id: 9, clue: "Bacaan mad karena dhamir “هُ” diapit dua huruf hidup – 2 kata", answer: "MAD SILAH", start: { row: 10, col: 0 } },
+    ],
+    down: [
+      { id: 2, clue: "Bacaan mad yang terjadi saat dhamir “هُ” berada di antara dua huruf hidup (2 kata)", answer: "MAD SILAH", start: { row: 0, col: 4 } },
+      { id: 4, clue: "Hukum bacaan huruf ro yang dibaca tipis atau tebal sesuai letak dan harakat (2 kata)", answer: "HUKUM RO", start: { row: 2, col: 8 } },
+      { id: 6, clue: "Ayat yang menyebut bahwa manusia diuji dengan nikmat atau kesempitan (1 kata - surat)", answer: "ALFAJR", start: { row: 4, col: 2 } },
+      { id: 10, clue: "Bacaan mad karena fathatain di akhir kalimat – 2 kata", answer: "MAD IWAD", start: { row: 6, col: 6 } },
+      { id: 11, clue: "Nama hukum bacaan huruf ر  yang bisa tebal atau tipis – 2 kata", answer: "HUKUM RO", start: { row: 0, col: 10 } },
+    ],
+    gridSize: 15, // Adjusted grid size for longer answers
+  },
+  quiz: [
+    {
+      question: "Apa itu Mad ‘Arid Lissukun?",
+      options: ["Mad karena bertemu hamzah dalam satu kata", "Mad karena waqaf di akhir bacaan", "Mad karena huruf mati asli", "Mad yang dibaca dua harakat"],
+      answer: "Mad karena waqaf di akhir bacaan",
+    },
+    {
+      question: "Mad Iwad terjadi ketika ...",
+      options: ["Huruf mad bertemu tasydid", "Dhamir “hu” di akhir ayat", "Hamzah dalam satu kata", "Fathatain di akhir kalimat dibaca panjang"],
+      answer: "Fathatain di akhir kalimat dibaca panjang",
+    },
+    {
+      question: "Makna dari QS. Al-Fajr ayat 15–16 adalah ...",
+      options: ["Larangan menyekutukan Allah", "Manusia diuji dengan kekayaan dan kesempitan", "Anjuran jihad di jalan Allah", "Perintah bersabar atas musibah"],
+      answer: "Manusia diuji dengan kekayaan dan kesempitan",
+    },
+    {
+      question: "Ayat tentang anjuran infaq sebelum datangnya hari kiamat terdapat pada surah ...",
+      options: ["An-Nisa ayat 3", "Al-Fajr ayat 15", "Al-Baqarah ayat 254", "Al-Kahfi ayat 110"],
+      answer: "Al-Baqarah ayat 254",
+    },
+    {
+      question: "Perilaku yang sesuai dengan anjuran QS. Al-Baqarah:254 adalah ...",
+      options: ["Membelanjakan harta di jalan Allah", "Infaq saat ada waktu luang", "Menunda sedekah sampai tua", "Memberi setelah diminta saja"],
+      answer: "Membelanjakan harta di jalan Allah",
+    },
+    {
+      question: "Apa yang dimaksud dengan Mad Silah?",
+      options: ["Mad yang terjadi pada kata yang diakhiri huruf mad", "Mad pada dhamir “هُ” Yang Bertemu Dengan Huruf Selain Hamzah", "Mad yang dibaca panjang karena waqaf", "Mad karena bertemu huruf mati asli"],
+      answer: "Mad pada dhamir “هُ” Yang Bertemu Dengan Huruf Selain Hamzah",
+    },
+    {
+      question: "Huruf “ر” dalam hukum bacaan tajwid dibaca tebal apabila ...",
+      options: ["Berharakat kasrah", "Didahului sukun dan sebelumnya huruf berharakat kasrah", "Berharakat fathah atau dhammah", "Di akhir kata setelah huruf mad"],
+      answer: "Berharakat fathah atau dhammah",
+    },
+    {
+      question: "Perilaku yang menunjukkan pemahaman terhadap QS. Al-Fajr:15–16 adalah ...",
+      options: ["Sombong saat kaya", "Berkeluh kesah saat miskin", "Menyalahkan takdir saat susah", "Bersyukur dan sabar dalam segala keadaan"],
+      answer: "Bersyukur dan sabar dalam segala keadaan",
+    },
+    {
+      question: "Kapan bacaan mad layyin dibaca panjang?",
+      options: ["Saat berhenti (waqaf) pada akhir kata", "Saat bertemu huruf hamzah", "Saat bertemu huruf sukun asli", "Selalu dibaca panjang dalam semua keadaan"],
+      answer: "Saat berhenti (waqaf) pada akhir kata",
+    },
+    {
+      question: "Berikut ini adalah contoh amal yang termasuk infaq, kecuali ...",
+      options: ["Menyumbang ke masjid", "Memberi orang miskin", "Membayar zakat fitrah", "Menyumbang ke acara konser"],
+      answer: "Menyumbang ke acara konser",
+    },
+  ],
+};
+
+function App() {
+  const [currentPage, setCurrentPage] = useState('login'); // 'login', 'dashboard', 'wordSearch', 'crossword', 'quiz'
+  const [studentName, setStudentName] = useState('');
+  const [selectedClass, setSelectedClass] = useState('');
+  const [db, setDb] = useState(null);
+  const [auth, setAuth] = useState(null);
+  const [userId, setUserId] = useState(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [notification, setNotification] = useState({ message: '', type: '' }); // 'success', 'error'
+  const [showNotification, setShowNotification] = useState(false);
+
+  // Initialize Firebase and Auth
+  useEffect(() => {
+    try {
+      const app = initializeApp(firebaseConfig);
+      const firestoreDb = getFirestore(app);
+      const firebaseAuth = getAuth(app);
+      setDb(firestoreDb);
+      setAuth(firebaseAuth);
+
+      const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+        if (user) {
+          setUserId(user.uid);
+          setIsAuthReady(true);
+        } else {
+          // If no user, try to sign in with custom token or anonymously
+          if (initialAuthToken) {
+            try {
+              await signInWithCustomToken(firebaseAuth, initialAuthToken);
+            } catch (error) {
+              console.error("Error signing in with custom token:", error);
+              await signInAnonymously(firebaseAuth); // Fallback to anonymous
+            }
+          } else {
+            await signInAnonymously(firebaseAuth); // Sign in anonymously if no token
+          }
+          setIsAuthReady(true); // Auth state is ready after initial check/sign-in attempt
+        }
+      });
+
+      return () => unsubscribe();
+    } catch (error) {
+      console.error("Error initializing Firebase:", error);
+      setNotification({ message: 'Error initializing Firebase. Please check console.', type: 'error' });
+      setShowNotification(true);
+    }
+  }, []);
+
+  // Function to show notification
+  const showTemporaryNotification = (message, type) => {
+    setNotification({ message, type });
+    setShowNotification(true);
+    setTimeout(() => {
+      setShowNotification(false);
+      setNotification({ message: '', type: '' });
+    }, 3000); // Hide after 3 seconds
+  };
+
+  // Function to save results to Firestore
+  const saveResult = async (gameType, score, details) => {
+    if (!db || !userId || !studentName || !selectedClass) {
+      showTemporaryNotification('Gagal menyimpan hasil: Data pengguna atau Firebase belum siap.', 'error');
+      console.error('Firestore not initialized or user data missing.');
+      return;
+    }
+
+    try {
+      // Use public collection for shared data
+      const docRef = await addDoc(collection(db, `artifacts/${appId}/public/data/remedial_results`), {
+        userId: userId,
+        studentName: studentName,
+        class: selectedClass,
+        gameType: gameType,
+        score: score,
+        details: JSON.stringify(details), // Stringify complex objects for Firestore
+        timestamp: serverTimestamp(),
+      });
+      showTemporaryNotification('Hasil berhasil disimpan!', 'success');
+      console.log("Document written with ID: ", docRef.id);
+    } catch (e) {
+      showTemporaryNotification('Gagal menyimpan hasil: ' + e.message, 'error');
+      console.error("Error adding document: ", e);
+    }
+  };
+
+  const handleLogin = () => {
+    if (studentName && selectedClass) {
+      setCurrentPage('dashboard');
+    } else {
+      showTemporaryNotification('Harap isi Nama dan pilih Kelas!', 'error');
+    }
+  };
+
+  const handleTaskSelection = (task) => {
+    setCurrentPage(task);
+  };
+
+  const handleCompleteAllClass7 = async () => {
+    // This function will sequentially load each game.
+    // For a real implementation, you'd need a more robust state machine
+    // to track progress through each game and collect results before saving.
+    // For this demo, we'll just indicate the flow.
+    showTemporaryNotification('Mulai mengerjakan "Cari Kata"...', 'success');
+    setCurrentPage('wordSearch'); // Start Word Search
+    // After Word Search completion, a callback would move to Crossword, then Quiz.
+    // This is a simplified representation.
+  };
+
+  const getGameData = (className) => {
+    return className === 'Kelas 7' ? class7Data : class8Data;
+  };
+
+  // Main navigation switch for different pages
+  const renderPage = () => {
+    switch (currentPage) {
+      case 'login':
+        return (
+          <LoginScreen
+            studentName={studentName}
+            setStudentName={setStudentName}
+            selectedClass={selectedClass}
+            setSelectedClass={setSelectedClass}
+            onLogin={handleLogin}
+            showNotification={showNotification}
+            notification={notification}
+          />
+        );
+      case 'dashboard':
+        return (
+          <DashboardScreen
+            studentName={studentName}
+            selectedClass={selectedClass}
+            onTaskSelect={handleTaskSelection}
+            onCompleteAllClass7={handleCompleteAllClass7}
+            onBack={() => setCurrentPage('login')}
+          />
+        );
+      case 'wordSearch':
+        return (
+          <WordSearchGame
+            words={getGameData(selectedClass).wordSearchWords}
+            onComplete={(score, details) => {
+              saveResult('Cari Kata', score, details);
+              setCurrentPage('dashboard');
+            }}
+            onBack={() => setCurrentPage('dashboard')}
+          />
+        );
+      case 'crossword':
+        return (
+          <CrosswordGame
+            crosswordData={getGameData(selectedClass).crossword}
+            onComplete={(score, details) => {
+              saveResult('Teka-Teki Silang', score, details);
+              setCurrentPage('dashboard');
+            }}
+            onBack={() => setCurrentPage('dashboard')}
+          />
+        );
+      case 'quiz':
+        return (
+          <QuizGame
+            quizData={getGameData(selectedClass).quiz}
+            onComplete={(score, details) => {
+              saveResult('Kuis Menarik', score, details);
+              setCurrentPage('dashboard');
+            }}
+            onBack={() => setCurrentPage('dashboard')}
+          />
+        );
+      default:
+        return <LoginScreen />;
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 font-inter text-gray-800 flex flex-col items-center justify-center p-4">
+      {/* Global Notification */}
+      {showNotification && (
+        <div className={`fixed top-4 right-4 p-3 rounded-lg shadow-lg z-50 ${notification.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
+          {notification.message}
+        </div>
+      )}
+      {renderPage()}
+    </div>
+  );
+}
+
+// --- Login Screen Component ---
+const LoginScreen = ({ studentName, setStudentName, selectedClass, setSelectedClass, onLogin, showNotification, notification }) => {
+  return (
+    <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full text-center transform transition duration-500 hover:scale-105">
+      <img src="https://iili.io/F9QKYve.jpg" alt="Logo MTs Al-Ikhwan Cihea" className="mx-auto h-24 mb-6 rounded-lg shadow-md" />
+      <h1 className="text-3xl font-extrabold text-green-700 mb-4">Pengayaan Mata Pelajaran Al-Qur’an Hadis</h1>
+      <p className="text-lg text-gray-600 mb-6">
+        Saatnya berpetualang dan mengisi nilai yang kosong! Belajar sambil bermain yuk!
+      </p>
+      <p className="text-sm italic text-gray-500 mb-6">- Wulan Saumi Awaliah, S.Pd.</p>
+
+      <div className="mb-4">
+        <input
+          type="text"
+          placeholder="Nama Lengkap Kamu"
+          value={studentName}
+          onChange={(e) => setStudentName(e.target.value)}
+          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent transition"
+        />
+      </div>
+      <div className="mb-6">
+        <select
+          value={selectedClass}
+          onChange={(e) => setSelectedClass(e.target.value)}
+          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent transition bg-white"
+        >
+          <option value="">Pilih Kelas</option>
+          <option value="Kelas 7">Kelas 7</option>
+          <option value="Kelas 8">Kelas 8</option>
+        </select>
+      </div>
+      <button
+        onClick={onLogin}
+        className="w-full bg-green-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-green-700 transition duration-300 transform hover:scale-105"
+      >
+        Mulai Petualangan!
+      </button>
+    </div>
+  );
+};
+
+// --- Dashboard Screen Component ---
+const DashboardScreen = ({ studentName, selectedClass, onTaskSelect, onCompleteAllClass7, onBack }) => {
+  const renderClass7Tasks = () => (
+    <>
+      <button
+        onClick={() => onTaskSelect('wordSearch')}
+        className="bg-purple-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg hover:bg-purple-700 transform hover:scale-105 transition duration-300 w-full"
+      >
+        <i className="fas fa-search text-xl mr-3"></i> Tugas 1: Cari Kata
+      </button>
+      <button
+        onClick={() => onTaskSelect('crossword')}
+        className="bg-blue-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg hover:bg-blue-700 transform hover:scale-105 transition duration-300 w-full"
+      >
+        <i className="fas fa-puzzle-piece text-xl mr-3"></i> Tugas 2: Teka-Teki Silang (TTS)
+      </button>
+      <button
+        onClick={() => onTaskSelect('quiz')}
+        className="bg-pink-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg hover:bg-pink-700 transform hover:scale-105 transition duration-300 w-full"
+      >
+        <i className="fas fa-question-circle text-xl mr-3"></i> Tugas 3: Kuis Menarik (10 Soal)
+      </button>
+      <button
+        onClick={onCompleteAllClass7}
+        className="bg-emerald-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg hover:bg-emerald-700 transform hover:scale-105 transition duration-300 w-full col-span-full"
+      >
+        <i className="fas fa-play-circle text-xl mr-3"></i> Kerjakan Ketiganya (Berurutan)
+      </button>
+    </>
+  );
+
+  const renderClass8Tasks = () => (
+    <>
+      <button
+        onClick={() => onTaskSelect('crossword')}
+        className="bg-blue-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg hover:bg-blue-700 transform hover:scale-105 transition duration-300 w-full"
+      >
+        <i className="fas fa-puzzle-piece text-xl mr-3"></i> Tugas 1: Teka-Teki Silang (TTS)
+      </button>
+      <button
+        onClick={() => onTaskSelect('quiz')}
+        className="bg-pink-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg hover:bg-pink-700 transform hover:scale-105 transition duration-300 w-full"
+      >
+        <i className="fas fa-question-circle text-xl mr-3"></i> Tugas 2: Kuis Menarik (10 Soal)
+      </button>
+    </>
+  );
+
+  return (
+    <div className="bg-white rounded-xl shadow-2xl p-8 max-w-2xl w-full text-center">
+      <h2 className="text-3xl font-extrabold text-green-700 mb-4">
+        Selamat Datang, <span className="text-emerald-600">{studentName}</span> dari {selectedClass}!
+      </h2>
+      <p className="text-lg text-gray-600 mb-8">
+        Pilih tugas remedial yang ingin kamu kerjakan hari ini:
+      </p>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        {selectedClass === 'Kelas 7' ? renderClass7Tasks() : renderClass8Tasks()}
+      </div>
+
+      <div className="border-t border-gray-200 pt-6">
+        <h3 className="text-xl font-bold text-gray-700 mb-3">Panduan Singkat:</h3>
+        <ul className="text-left text-gray-600 list-disc list-inside">
+          <li><span className="font-semibold">Cari Kata:</span> Temukan kata tersembunyi di kotak huruf. Klik dan seret untuk menandai kata!</li>
+          <li><span className="font-semibold">Teka-Teki Silang:</span> Isi kotak kosong dengan jawaban yang benar berdasarkan petunjuk.</li>
+          <li><span className="font-semibold">Kuis Menarik:</span> Jawab 10 soal pilihan ganda. Dapatkan skor terbaikmu!</li>
+        </ul>
+      </div>
+      <button
+        onClick={onBack}
+        className="mt-8 bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg shadow hover:bg-gray-400 transition duration-300"
+      >
+        <i className="fas fa-arrow-left mr-2"></i> Kembali ke Login
+      </button>
+    </div>
+  );
+};
+
+// --- Word Search Game Component ---
+const WordSearchGame = ({ words, onComplete, onBack }) => {
+  const [grid, setGrid] = useState([]);
+  const [foundWords, setFoundWords] = useState(new Set());
+  const [message, setMessage] = useState('');
+  const [startCell, setStartCell] = useState(null);
+  const [endCell, setEndCell] = useState(null);
+  const audioCorrectRef = useRef(new Audio('https://www.soundjay.com/buttons/beep-07.mp3')); // Simple beep
+  const audioIncorrectRef = useRef(new Audio('https://www.soundjay.com/buttons/beep-06.mp3')); // Different beep
+
+  const gridSize = 15; // Example grid size, can be dynamic
+  const wordsToFind = words.map(w => w.toUpperCase()); // Ensure words are uppercase for comparison
+
+  useEffect(() => {
+    generateGrid();
+  }, [words]);
+
+  const generateGrid = () => {
+    let newGrid = Array(gridSize).fill(null).map(() => Array(gridSize).fill(''));
+    let placedWords = [];
+
+    // Simple word placement strategy (can be improved for more complex puzzles)
+    wordsToFind.forEach(word => {
+      let placed = false;
+      let attempts = 0;
+      while (!placed && attempts < 100) {
+        const direction = Math.random() < 0.5 ? 'horizontal' : 'vertical';
+        const row = Math.floor(Math.random() * gridSize);
+        const col = Math.floor(Math.random() * gridSize);
+
+        if (direction === 'horizontal' && col + word.length <= gridSize) {
+          let canPlace = true;
+          for (let i = 0; i < word.length; i++) {
+            if (newGrid[row][col + i] !== '' && newGrid[row][col + i] !== word[i]) {
+              canPlace = false;
+              break;
+            }
+          }
+          if (canPlace) {
+            for (let i = 0; i < word.length; i++) {
+              newGrid[row][col + i] = word[i];
+            }
+            const endCol = col + word.length - 1; // Pre-calculate end column
+            placedWords.push({ word, start: { row, col }, end: { row: row, col: endCol } }); // FIX: Ensure key-value pair for col
+            placed = true;
+          }
+        } else if (direction === 'vertical' && row + word.length <= gridSize) {
+          let canPlace = true;
+          for (let i = 0; i < word.length; i++) {
+            if (newGrid[row + i][col] !== '' && newGrid[row + i][col] !== word[i]) {
+              canPlace = false;
+              break;
+            }
+          }
+          if (canPlace) {
+            for (let i = 0; i < word.length; i++) {
+              newGrid[row + i][col] = word[i];
+            }
+            const endRow = row + word.length - 1; // Pre-calculate end row
+            placedWords.push({ word, start: { row, col }, end: { row: endRow, col: col } }); // FIX: Ensure key-value pair for row
+            placed = true;
+          }
+        }
+        attempts++;
+      }
+    });
+
+    // Fill remaining empty cells with random letters
+    for (let r = 0; r < gridSize; r++) {
+      for (let c = 0; c < gridSize; c++) {
+        if (newGrid[r][c] === '') {
+          newGrid[r][c] = String.fromCharCode(65 + Math.floor(Math.random() * 26)); // Random uppercase letter
+        }
+      }
+    }
+    setGrid(newGrid);
+  };
+
+  const handleMouseDown = (row, col) => {
+    setStartCell({ row, col });
+    setEndCell(null);
+  };
+
+  const handleMouseEnter = (row, col) => {
+    if (startCell) {
+      setEndCell({ row, col });
+    }
+  };
+
+  const handleMouseUp = () => {
+    if (startCell && endCell) {
+      checkWord(startCell, endCell);
+    }
+    setStartCell(null);
+    setEndCell(null);
+  };
+
+  const checkWord = (start, end) => {
+    let selectedChars = [];
+    let isHorizontal = start.row === end.row;
+    let isVertical = start.col === end.col;
+
+    if (!isHorizontal && !isVertical) {
+      setMessage('Pilih kata secara horizontal atau vertikal saja.');
+      audioIncorrectRef.current.play();
+      return;
+    }
+
+    if (isHorizontal) {
+      const minCol = Math.min(start.col, end.col);
+      const maxCol = Math.max(start.col, end.col);
+      for (let c = minCol; c <= maxCol; c++) {
+        selectedChars.push(grid[start.row][c]);
+      }
+    } else if (isVertical) {
+      const minRow = Math.min(start.row, end.row);
+      const maxRow = Math.max(start.row, end.row);
+      for (let r = minRow; r <= maxRow; r++) {
+        selectedChars.push(grid[r][start.col]);
+      }
+    }
+
+    const selectedWord = selectedChars.join('');
+    const reversedSelectedWord = selectedChars.reverse().join(''); // Check for reversed words too
+
+    if (wordsToFind.includes(selectedWord) && !foundWords.has(selectedWord)) {
+      setFoundWords(prev => new Set(prev).add(selectedWord));
+      setMessage(`Selamat! Kamu menemukan kata "${selectedWord}"!`);
+      audioCorrectRef.current.play();
+    } else if (wordsToFind.includes(reversedSelectedWord) && !foundWords.has(reversedSelectedWord)) {
+      setFoundWords(prev => new Set(prev).add(reversedSelectedWord));
+      setMessage(`Selamat! Kamu menemukan kata "${reversedSelectedWord}"!`);
+      audioCorrectRef.current.play();
+    }
+    else {
+      setMessage(`Bukan kata yang benar, coba lagi!`);
+      audioIncorrectRef.current.play();
+    }
+
+    if (foundWords.size + 1 === wordsToFind.length) { // Check if word is found after adding
+      setTimeout(() => {
+        setMessage(`Hebat! Kamu telah menemukan semua ${wordsToFind.length} kata!`);
+        onComplete(wordsToFind.length, { foundWords: Array.from(foundWords).concat([selectedWord]) });
+      }, 1000);
+    }
+  };
+
+  const isHighlighted = (row, col) => {
+    if (!startCell || !endCell) return false;
+
+    const minRow = Math.min(startCell.row, endCell.row);
+    const maxRow = Math.max(startCell.row, endCell.row);
+    const minCol = Math.min(startCell.col, endCell.col);
+    const maxCol = Math.max(startCell.col, endCell.col);
+
+    const withinRow = row >= minRow && row <= maxRow;
+    const withinCol = col >= minCol && col <= maxCol;
+
+    if (startCell.row === endCell.row && withinCol && row === startCell.row) { // Horizontal
+      return true;
+    }
+    if (startCell.col === endCell.col && withinRow && col === startCell.col) { // Vertical
+      return true;
+    }
+    return false;
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-2xl p-8 max-w-4xl w-full text-center">
+      <h2 className="text-3xl font-extrabold text-purple-700 mb-6">Tugas 1: Cari Kata</h2>
+      <p className="text-lg text-gray-600 mb-4">
+        Temukan kata-kata tersembunyi berikut yang berkaitan dengan materi pelajaran!
+      </p>
+
+      <div className="flex flex-col md:flex-row gap-6 mb-8">
+        <div className="w-full md:w-1/3 p-4 bg-purple-50 rounded-lg shadow-inner">
+          <h3 className="text-xl font-bold text-purple-600 mb-3">Daftar Kata:</h3>
+          <ul className="text-left text-gray-700 list-disc list-inside">
+            {wordsToFind.map(word => (
+              <li key={word} className={`${foundWords.has(word) ? 'line-through text-gray-400' : ''}`}>
+                {word}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-4 text-sm text-gray-500">
+            Kata ditemukan: {foundWords.size} / {wordsToFind.length}
+          </p>
+        </div>
+
+        <div className="w-full md:w-2/3">
+          <div
+            className="grid gap-0.5"
+            style={{
+              gridTemplateColumns: `repeat(${gridSize}, minmax(0, 1fr))`,
+              gridTemplateRows: `repeat(${gridSize}, minmax(0, 1fr))`,
+              aspectRatio: '1 / 1'
+            }}
+            onMouseLeave={() => { setStartCell(null); setEndCell(null); }} // Reset on leaving grid
+          >
+            {grid.map((rowArr, rowIndex) =>
+              rowArr.map((char, colIndex) => (
+                <div
+                  key={`${rowIndex}-${colIndex}`}
+                  className={`flex items-center justify-center p-1 font-bold text-lg rounded-sm cursor-pointer select-none transition-colors
+                    ${isHighlighted(rowIndex, colIndex) ? 'bg-purple-300' : 'bg-purple-100'}
+                    ${foundWords.has(wordsToFind.find(w => {
+                        const wordLength = w.length;
+                        // Check horizontal
+                        if (colIndex + wordLength <= gridSize && wordsToFind.includes(grid[rowIndex].slice(colIndex, colIndex + wordLength).join('')) && grid[rowIndex].slice(colIndex, colIndex + wordLength).join('') === w) {
+                           return true;
+                        }
+                        // Check vertical
+                        if (rowIndex + wordLength <= gridSize) {
+                            let verticalWord = '';
+                            for (let i = 0; i < wordLength; i++) {
+                                verticalWord += grid[rowIndex + i][colIndex];
+                            }
+                            if (wordsToFind.includes(verticalWord) && verticalWord === w) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    })) ? 'bg-green-300 text-green-800' : 'text-purple-800'}
+                  `}
+                  onMouseDown={() => handleMouseDown(rowIndex, colIndex)}
+                  onMouseEnter={() => handleMouseEnter(rowIndex, colIndex)}
+                  onMouseUp={handleMouseUp}
+                >
+                  {char}
+                </div>
+              ))
+            )}
+          </div>
+          {message && (
+            <p className={`mt-4 text-xl font-semibold ${message.includes('Selamat') ? 'text-green-600' : 'text-red-600'}`}>
+              {message}
+            </p>
+          )}
+        </div>
+      </div>
+      <button
+        onClick={onBack}
+        className="mt-8 bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg shadow hover:bg-gray-400 transition duration-300"
+      >
+        <i className="fas fa-arrow-left mr-2"></i> Kembali ke Dashboard
+      </button>
+    </div>
+  );
+};
+
+
+// --- Crossword Game Component ---
+const CrosswordGame = ({ crosswordData, onComplete, onBack }) => {
+  const { across, down, gridSize } = crosswordData;
+  const [grid, setGrid] = useState([]);
+  const [answers, setAnswers] = useState({}); // { '1_across': 'jawaban', '2_down': 'jawaban' }
+  const [message, setMessage] = useState('');
+  const audioCorrectRef = useRef(new Audio('https://www.soundjay.com/buttons/beep-07.mp3'));
+  const audioIncorrectRef = useRef(new Audio('https://www.soundjay.com/buttons/beep-06.mp3'));
+  const inputRefs = useRef({});
+
+  useEffect(() => {
+    initializeGrid();
+  }, [crosswordData]);
+
+  const initializeGrid = () => {
+    // Create an empty grid
+    let newGrid = Array(gridSize).fill(null).map(() => Array(gridSize).fill({ char: '', type: 'empty' }));
+
+    // Place letters based on correct answers to define the puzzle structure
+    across.forEach(q => {
+      const word = q.answer.toUpperCase().replace(/\s/g, ''); // Remove spaces
+      for (let i = 0; i < word.length; i++) {
+        if (q.start.row < gridSize && q.start.col + i < gridSize) {
+          newGrid[q.start.row][q.start.col + i] = { char: '', type: 'across', questionId: q.id };
+        }
+      }
+    });
+
+    down.forEach(q => {
+      const word = q.answer.toUpperCase().replace(/\s/g, ''); // Remove spaces
+      for (let i = 0; i < word.length; i++) {
+        if (q.start.row + i < gridSize && q.start.col < gridSize) {
+          // If a cell is already part of an 'across' word, mark it as 'both'
+          if (newGrid[q.start.row + i][q.start.col].type === 'across') {
+            newGrid[q.start.row + i][q.start.col] = { char: '', type: 'both', questionId: newGrid[q.start.row + i][q.start.col].questionId, downId: q.id };
+          } else {
+            newGrid[q.start.row + i][q.start.col] = { char: '', type: 'down', questionId: q.id };
+          }
+        }
+      }
+    });
+
+    setGrid(newGrid);
+    setAnswers({}); // Reset answers
+    setMessage('');
+  };
+
+  const handleInputChange = (e, row, col, direction, qId) => {
+    const value = e.target.value.toUpperCase();
+    const newAnswers = { ...answers, [`${qId}_${direction}`]: value };
+    setAnswers(newAnswers);
+
+    // Update grid with user's input for visual feedback (optional, but good for interactive TTS)
+    const newGrid = [...grid];
+    if (newGrid[row] && newGrid[row][col]) {
+      newGrid[row][col].char = value.length > 0 ? value[0] : ''; // Only take first char
+      setGrid(newGrid);
+    }
+  };
+
+  const checkAllAnswers = () => {
+    let correctCount = 0;
+    let totalQuestions = 0;
+    let details = {};
+
+    across.forEach(q => {
+      totalQuestions++;
+      const userAnswer = answers[`${q.id}_across`] || '';
+      const correctAnswer = q.answer.toUpperCase().replace(/\s/g, '');
+      const isCorrect = userAnswer === correctAnswer;
+      if (isCorrect) correctCount++;
+      details[`across_${q.id}`] = { userAnswer, correctAnswer, isCorrect };
+    });
+
+    down.forEach(q => {
+      totalQuestions++;
+      const userAnswer = answers[`${q.id}_down`] || '';
+      const correctAnswer = q.answer.toUpperCase().replace(/\s/g, '');
+      const isCorrect = userAnswer === correctAnswer;
+      if (isCorrect) correctCount++;
+      details[`down_${q.id}`] = { userAnswer, correctAnswer, isCorrect };
+    });
+
+    if (correctCount === totalQuestions) {
+      setMessage(`Selamat! Kamu menyelesaikan TTS dengan sempurna!`);
+      audioCorrectRef.current.play();
+      onComplete(correctCount, details);
+    } else {
+      setMessage(`Ada ${totalQuestions - correctCount} jawaban yang salah. Coba lagi!`);
+      audioIncorrectRef.current.play();
+    }
+  };
+
+  const getCellClassName = (cell, row, col) => {
+    let className = 'border border-gray-300 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center relative';
+    if (cell.type === 'empty') {
+      className += ' bg-gray-200';
+    } else {
+      className += ' bg-white';
+      // Add feedback class based on current state (can be enhanced with specific correct/wrong cell coloring)
+      const isAnswered = (answers[`${cell.questionId}_across`] || answers[`${cell.questionId}_down`]) ? true : false;
+      if (isAnswered) {
+        // More granular feedback could check character by character
+      }
+    }
+    return className;
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-2xl p-8 max-w-4xl w-full text-center">
+      <h2 className="text-3xl font-extrabold text-blue-700 mb-6">Tugas: Teka-Teki Silang (TTS)</h2>
+      <p className="text-lg text-gray-600 mb-4">
+        Isi kotak kosong dengan jawaban yang benar berdasarkan petunjuk.
+      </p>
+
+      <div className="flex flex-col md:flex-row gap-8 mt-6">
+        {/* Clues Section */}
+        <div className="w-full md:w-1/2 p-4 bg-blue-50 rounded-lg shadow-inner">
+          <h3 className="text-xl font-bold text-blue-600 mb-3">Petunjuk Mendatar:</h3>
+          <ul className="text-left text-gray-700 list-decimal list-inside mb-4">
+            {across.map(q => <li key={q.id}>{q.id}. {q.clue}</li>)}
+          </ul>
+          <h3 className="text-xl font-bold text-blue-600 mb-3">Petunjuk Menurun:</h3>
+          <ul className="text-left text-gray-700 list-decimal list-inside">
+            {down.map(q => <li key={q.id}>{q.id}. {q.clue}</li>)}
+          </ul>
+        </div>
+
+        {/* Crossword Grid */}
+        <div className="w-full md:w-1/2">
+          <div
+            className="grid gap-0.5 mx-auto"
+            style={{
+              gridTemplateColumns: `repeat(${gridSize}, minmax(0, 1fr))`,
+              gridTemplateRows: `repeat(${gridSize}, minmax(0, 1fr))`,
+              aspectRatio: '1 / 1',
+              maxWidth: '400px' // Limit grid size for readability
+            }}
+          >
+            {grid.map((rowArr, rowIndex) =>
+              rowArr.map((cell, colIndex) => {
+                const cellKey = `${rowIndex}-${colIndex}`;
+                return (
+                  <div key={cellKey} className={getCellClassName(cell, rowIndex, colIndex)}>
+                    {cell.type !== 'empty' && (
+                      <input
+                        ref={el => inputRefs.current[cellKey] = el}
+                        type="text"
+                        maxLength="1"
+                        className="w-full h-full text-center text-xl font-bold uppercase bg-transparent focus:outline-none"
+                        value={cell.char}
+                        onChange={(e) => handleInputChange(e, rowIndex, colIndex, cell.type, cell.questionId || cell.downId)}
+                      />
+                    )}
+                    {cell.type !== 'empty' && (
+                        (across.find(q => q.start.row === rowIndex && q.start.col === colIndex) || down.find(q => q.start.row === rowIndex && q.start.col === colIndex)) && (
+                        <span className="absolute top-0.5 left-0.5 text-xs font-semibold text-gray-600">
+                            {across.find(q => q.start.row === rowIndex && q.start.col === colIndex)?.id ||
+                            down.find(q => q.start.row === rowIndex && q.start.col === colIndex)?.id}
+                        </span>
+                        )
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <button
+            onClick={checkAllAnswers}
+            className="mt-6 bg-blue-600 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:bg-blue-700 transform hover:scale-105 transition duration-300"
+          >
+            Periksa Jawaban
+          </button>
+          {message && (
+            <p className={`mt-4 text-xl font-semibold ${message.includes('Selamat') ? 'text-green-600' : 'text-red-600'}`}>
+              {message}
+            </p>
+          )}
+        </div>
+      </div>
+      <button
+        onClick={onBack}
+        className="mt-8 bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg shadow hover:bg-gray-400 transition duration-300"
+      >
+        <i className="fas fa-arrow-left mr-2"></i> Kembali ke Dashboard
+      </button>
+    </div>
+  );
+};
+
+
+// --- Quiz Game Component ---
+const QuizGame = ({ quizData, onComplete, onBack }) => {
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [score, setScore] = useState(0);
+  const [feedback, setFeedback] = useState('');
+  const [selectedOption, setSelectedOption] = useState(null);
+  const [quizCompleted, setQuizCompleted] = useState(false);
+  const [answerDetails, setAnswerDetails] = useState([]); // To store details for Firestore
+  const audioCorrectRef = useRef(new Audio('https://www.soundjay.com/buttons/beep-07.mp3'));
+  const audioIncorrectRef = useRef(new Audio('https://www.soundjay.com/buttons/beep-06.mp3'));
+
+  const currentQuestion = quizData[currentQuestionIndex];
+
+  const handleOptionSelect = (option) => {
+    if (selectedOption !== null) return; // Prevent multiple selections
+
+    setSelectedOption(option);
+    const isCorrect = option === currentQuestion.answer;
+
+    setAnswerDetails(prev => [
+      ...prev,
+      {
+        question: currentQuestion.question,
+        selected: option,
+        correctAnswer: currentQuestion.answer,
+        isCorrect: isCorrect,
+      }
+    ]);
+
+    if (isCorrect) {
+      setScore(prevScore => prevScore + 1);
+      setFeedback('Jawabanmu BENAR!');
+      audioCorrectRef.current.play();
+    } else {
+      setFeedback(`Salah! Jawaban yang benar adalah: "${currentQuestion.answer}"`);
+      audioIncorrectRef.current.play();
+    }
+
+    setTimeout(() => {
+      if (currentQuestionIndex < quizData.length - 1) {
+        setCurrentQuestionIndex(prevIndex => prevIndex + 1);
+        setSelectedOption(null);
+        setFeedback('');
+      } else {
+        setQuizCompleted(true);
+      }
+    }, 1500); // Wait 1.5 seconds before moving to next question
+  };
+
+  const restartQuiz = () => {
+    setCurrentQuestionIndex(0);
+    setScore(0);
+    setFeedback('');
+    setSelectedOption(null);
+    setQuizCompleted(false);
+    setAnswerDetails([]);
+  };
+
+  const finishQuiz = () => {
+    onComplete(score, { totalQuestions: quizData.length, answerDetails: answerDetails });
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-2xl p-8 max-w-2xl w-full text-center">
+      <h2 className="text-3xl font-extrabold text-pink-700 mb-6">Tugas: Kuis Menarik (10 Soal)</h2>
+      <p className="text-lg text-gray-600 mb-4">
+        Pilih jawaban yang paling tepat!
+      </p>
+
+      {!quizCompleted ? (
+        <div className="mb-8">
+          <p className="text-xl font-semibold mb-4">Soal {currentQuestionIndex + 1} dari {quizData.length}</p>
+          <p className="text-2xl font-bold text-gray-800 mb-6">{currentQuestion.question}</p>
+          <div className="grid grid-cols-1 gap-4">
+            {currentQuestion.options.map((option, index) => (
+              <button
+                key={index}
+                onClick={() => handleOptionSelect(option)}
+                className={`py-3 px-4 rounded-lg text-lg font-medium transition duration-300
+                  ${selectedOption === option
+                    ? (option === currentQuestion.answer ? 'bg-green-200 text-green-800' : 'bg-red-200 text-red-800')
+                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}
+                  ${selectedOption !== null && option !== currentQuestion.answer && 'opacity-60'}
+                  ${selectedOption !== null ? 'cursor-not-allowed' : 'cursor-pointer'}
+                `}
+                disabled={selectedOption !== null}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+          {feedback && (
+            <p className={`mt-6 text-xl font-semibold ${feedback.includes('BENAR') ? 'text-green-600' : 'text-red-600'}`}>
+              {feedback}
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="mb-8">
+          <h3 className="text-3xl font-bold text-emerald-600 mb-4">Kuis Selesai!</h3>
+          <p className="text-2xl mb-6">Skormu: <span className="font-extrabold text-emerald-700">{score}</span> dari {quizData.length}</p>
+          <button
+            onClick={restartQuiz}
+            className="bg-orange-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:bg-orange-600 transform hover:scale-105 transition duration-300 mr-4"
+          >
+            Ulangi Kuis
+          </button>
+          <button
+            onClick={finishQuiz}
+            className="bg-pink-600 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:bg-pink-700 transform hover:scale-105 transition duration-300"
+          >
+            Selesai
+          </button>
+        </div>
+      )}
+
+      <button
+        onClick={onBack}
+        className="mt-8 bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg shadow hover:bg-gray-400 transition duration-300"
+      >
+        <i className="fas fa-arrow-left mr-2"></i> Kembali ke Dashboard
+      </button>
+    </div>
+  );
+};
+
+export default App;
